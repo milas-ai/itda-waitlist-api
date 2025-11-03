@@ -1,10 +1,17 @@
-use actix_web::{get, App, HttpServer, Responder, middleware::Logger};
+use actix_web::{get, web, App, HttpServer, Responder, middleware::Logger};
 use scraper::{Html, Selector};
 use std::collections::HashMap;
+use serde::Deserialize;
 use std::error::Error;
 use rss::Channel;
 use std::env;
 use std::f32;
+
+#[derive(Deserialize)]
+struct QueryParams {
+    #[serde(rename = "collapse-after")]
+    collapse_after: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 struct Deal {
@@ -93,7 +100,7 @@ fn parse_game_deals(html_content: &str) -> Result<Vec<GameDeals>, Box<dyn Error>
     Ok(game_deals)
 }
 
-async fn get_rss_feed() -> Result<Channel, Box<dyn Error>> {
+async fn get_rss_feed() -> Result<(Channel, String), Box<dyn Error>> {
     let feed_url = format!(
         "https://isthereanydeal.com/feeds/waitlist.rss?token={}",
         env::var("WAITLIST_RSS_TOKEN").unwrap()
@@ -104,16 +111,24 @@ async fn get_rss_feed() -> Result<Channel, Box<dyn Error>> {
         .await?;
 
     let channel = Channel::read_from(&bytes[..])?;
-    Ok(channel)
+
+    let title_url = channel.items()
+        .first()
+        .and_then(|item| item.link())
+        .unwrap_or(&feed_url)
+        .to_string();
+
+    Ok((channel, title_url))
 }
 
 #[get("/")]
-async fn index() -> impl Responder {
+async fn index(query: web::Query<QueryParams>) -> impl Responder {
     match get_rss_feed().await {
-        Ok(channel) => {
-            let mut games_map: HashMap<String, GameDeals> = HashMap::new();
+        Ok((channel, title_url)) => {
+            let collapse_after = query.collapse_after.as_deref().unwrap_or("5");
 
-            for item in channel.items().iter().take(2) {
+            let mut games_map: HashMap<String, GameDeals> = HashMap::new();
+            for item in channel.items().iter().take(1) {
                 if let Some(description) = item.description() {
                     if let Ok(parsed_games) = parse_game_deals(description) {
                         for game in parsed_games {
@@ -148,7 +163,7 @@ async fn index() -> impl Responder {
             html.push_str("<html><head><title>Is There Any Deal? - Waitlist Notification</title>");
             html.push_str("</head><body>");
 
-            html.push_str("<ul class='list list-gap-10 list-with-separator collapsible-container' data-collapse-after='5'>");
+            html.push_str(&format!("<ul class='list list-gap-10 list-with-separator collapsible-container' data-collapse-after='{}'>", collapse_after));
             for game in games {
                 html.push_str("<li><div class='game'>");
                 html.push_str(&format!("<h2 class='color-highlight size-h2'>{}</h2>", game.name));
@@ -160,7 +175,7 @@ async fn index() -> impl Responder {
                     html.push_str("<ul>");
                     for deal in &game.deals {
                         html.push_str(&format!(
-                            "<li class='size-h4'><a class='color-primary' href='{}'><strong>{}</strong></a> ({}) - <strong class='color-subdued'>{}</strong></li>",
+                            "<li class='size-h4'><a class='color-primary' href='{}'>{}</a> ({}) - {}</li>",
                             deal.link, deal.price, deal.discount, deal.store
                         ));
                     }
@@ -173,6 +188,7 @@ async fn index() -> impl Responder {
             actix_web::HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
                 .insert_header(("Widget-Title", "Is There Any Deal?"))
+                .insert_header(("Widget-Title-URL", title_url))
                 .insert_header(("Widget-Content-Type", "html"))
                 .body(html)
         },

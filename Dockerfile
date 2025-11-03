@@ -10,7 +10,7 @@ RUN cargo build --release --locked
 
 # Final stage
 FROM debian:bookworm-slim
-ARG DEFAULT_PORT=8286
+ARG DEFAULT_PORT=8080
 
 RUN apt-get update \
     && apt-get install -y ca-certificates \ 

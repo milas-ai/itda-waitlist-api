@@ -20,7 +20,7 @@ struct GameDeals {
     deals: Vec<Deal>,
 }
 
-fn parse_game_deals(html_content: &str) -> Vec<GameDeals> {
+fn parse_game_deals(html_content: &str) -> Result<Vec<GameDeals>, Box<dyn Error>> {
     let document = Html::parse_document(html_content);
     let mut game_deals = Vec::new();
 
@@ -79,7 +79,7 @@ fn parse_game_deals(html_content: &str) -> Vec<GameDeals> {
 
         game_deals.push(GameDeals { name, historical_low, deals });
     }
-    game_deals
+    Ok(game_deals)
 }
 
 async fn get_rss_feed() -> Result<Channel, Box<dyn Error>> {
@@ -100,25 +100,64 @@ async fn get_rss_feed() -> Result<Channel, Box<dyn Error>> {
 async fn index() -> impl Responder {
     match get_rss_feed().await {
         Ok(channel) => {
-            let mut html = String::new();
-            html.push_str("<html><head><title>Waitlist RSS Feed</title></head><body>");
-            html.push_str("<h1>Waitlist RSS Feed</h1><ul>");
-            for item in channel.items() {
-                let title = item.title().unwrap_or("No title");
-                let description = item.description().unwrap_or("No description");
-                html.push_str(&format!("<li><strong>{}</strong><br/>{}</li>", title, description));
+            let mut games_map: HashMap<String, GameDeals> = HashMap::new();
+
+            for item in channel.items().iter().take(2) {
+                if let Some(description) = item.description() {
+                    if let Ok(parsed_games) = parse_game_deals(description) {
+                        for game in parsed_games {
+                            games_map
+                                .entry(game.name.clone())
+                                .or_insert_with(|| GameDeals {
+                                    name: game.name.clone(),
+                                    historical_low: game.historical_low.clone(),
+                                    deals: Vec::new(),
+                                })
+                                .deals.extend(game.deals);
+                        }
+                    }
+                }
             }
-            html.push_str("</ul></body></html>");
-            
+
+            let mut html = String::new();
+            html.push_str("<html><head><title>Waitlist RSS Feed</title>");
+            html.push_str("<style>
+                body { font-family: sans-serif; line-height: 1.6; }
+                .game { border: 1px solid #ccc; border-radius: 8px; margin: 15px; padding: 15px; }
+                .game h2 { margin-top: 0; }
+                ul { padding-left: 20px; }
+                li { margin-bottom: 5px; }
+            </style>");
+            html.push_str("</head><body>");
+            html.push_str("<h1>Waitlist RSS Feed</h1>");
+            for game in games_map.values() {
+                html.push_str("<div class='game'>");
+                html.push_str(&format!("<h2>{}</h2>", game.name));
+                html.push_str(&format!("<p><strong>Historical Low:</strong> {}</p>", game.historical_low));
+                
+                if game.deals.is_empty() {
+                    html.push_str("<p>No current deals available.</p>");
+                } else {
+                    html.push_str("<ul>");
+                    for deal in &game.deals {
+                        html.push_str(&format!(
+                            "<li><a href='{}'>{}</a> ({}) - <strong>{}</strong></li>",
+                            deal.link, deal.price, deal.discount, deal.store
+                        ));
+                    }
+                    html.push_str("</ul>");
+                }
+                html.push_str("</div>");
+            }
+            html.push_str("</body></html>");
+
             actix_web::HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
                 .body(html)
         },
         Err(e) => {
             eprintln!("Error fetching RSS feed: {}", e);
-            actix_web::HttpResponse::InternalServerError()
-                .content_type("text/plain; charset=utf-8")
-                .body("Failed to fetch RSS feed")
+            actix_web::HttpResponse::InternalServerError().body("Failed to fetch RSS feed")
         }
     }
 }

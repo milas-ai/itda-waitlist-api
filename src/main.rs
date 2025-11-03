@@ -1,9 +1,9 @@
 use actix_web::{get, App, HttpServer, Responder, middleware::Logger};
-use std::env;
-use std::error::Error;
-use rss::Channel;
 use scraper::{Html, Selector};
 use std::collections::HashMap;
+use std::error::Error;
+use rss::Channel;
+use std::env;
 
 #[derive(Debug, Clone)]
 struct Deal {

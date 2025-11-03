@@ -11,6 +11,8 @@ use std::f32;
 struct QueryParams {
     #[serde(rename = "collapse-after")]
     collapse_after: Option<String>,
+    #[serde(rename = "show-thumbnails")]
+    show_thumbnails: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,8 +157,11 @@ async fn get_rss_feed() -> Result<(Channel, String), Box<dyn Error>> {
 async fn index(query: web::Query<QueryParams>) -> impl Responder {
     match get_rss_feed().await {
         Ok((channel, title_url)) => {
+            // Parameter handling
             let collapse_after = query.collapse_after.as_deref().unwrap_or("5");
+            let show_thumbnails = query.show_thumbnails.as_deref().map(|s| s == "true").unwrap_or(true);
 
+            // Parse game deals from the RSS feed
             let mut games_map: HashMap<String, GameDeals> = HashMap::new();
             for item in channel.items().iter().take(1) {
                 if let Some(description) = item.description() {
@@ -201,7 +206,10 @@ async fn index(query: web::Query<QueryParams>) -> impl Responder {
 
             html.push_str(&format!("<ul class='list list-gap-10 list-with-separator collapsible-container' data-collapse-after='{}'>", collapse_after));
             for game in games {
-                html.push_str(&format!("<li class='game-container'><img src='{}' alt='{}' />", game.image_url, game.name));
+                html.push_str("<li class='game-container'>");
+                if show_thumbnails {
+                    html.push_str(&format!("<img src='{}' alt='{}' />", game.image_url, game.name));
+                }
                 html.push_str(&format!("<div class='game-content'><h2 class='color-highlight size-h2'>{}</h2>", game.name));
                 html.push_str(&format!("<p class='color-subdued'><strong>Historical Low:</strong> {}</p>", game.historical_low));
                 

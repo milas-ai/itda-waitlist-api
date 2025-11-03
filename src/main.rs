@@ -20,6 +20,68 @@ struct GameDeals {
     deals: Vec<Deal>,
 }
 
+fn parse_game_deals(html_content: &str) -> Vec<GameDeals> {
+    let document = Html::parse_document(html_content);
+    let mut game_deals = Vec::new();
+
+    let game_block_selector = Selector::parse("div[style*='margin-bottom:30px']").expect("Failed to create selector");
+    let game_name_selector = Selector::parse("a[style*='font-size:1.2em']").expect("Failed to create selector");
+    let historical_low_selector = Selector::parse("div[style*='font-size: 0.9em']").expect("Failed to create selector");
+    let deal_row_selector = Selector::parse("div[style*='padding-left:15px'] > div").expect("Failed to create selector");
+    let price_link_selector = Selector::parse("a[style*='font-size:1.1em']").expect("Failed to create selector");
+    let discount_selector = Selector::parse("span[style*='min-width:2.8em']").expect("Failed to create selector");
+
+    for game_block in document.select(&game_block_selector) {
+        let name = game_block.select(&game_name_selector)
+            .next()
+            .map(|e| e.text().collect::<String>())
+            .unwrap_or_else(|| "Unknown Game".to_string());
+
+        let historical_low = game_block.select(&historical_low_selector)
+            .next()
+            .map(|e| e.text().collect::<String>())
+            .unwrap_or_else(|| "".to_string())
+            .replace("Historical low: ", "")
+            .trim()
+            .to_string();
+
+        let mut deals = Vec::new();
+        for deal_element in game_block.select(&deal_row_selector) {
+            let price_link_element = deal_element.select(&price_link_selector).next();
+
+            let price = price_link_element
+                .map(|e| e.text().collect::<String>().trim().to_string())
+                .unwrap_or_else(|| "N/A".to_string());
+
+            let link = price_link_element
+                .map(|e| e.value().attr("href").unwrap_or("#").to_string())
+                .unwrap_or_else(|| "#".to_string());
+
+            let discount = deal_element.select(&discount_selector)
+                .next()
+                .map(|e| e.text().collect::<String>().trim().to_string())
+                .unwrap_or_else(|| "N/A".to_string());
+
+            let store_raw: Vec<String> = deal_element.text()
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+
+            let mut store = "Unknown Store".to_string();
+            if let Some(on_index) = store_raw.iter().position(|s| s == "on") {
+                if let Some(store_name) = store_raw.get(on_index + 1) {
+                    store = store_name.clone();
+                }
+            }
+
+            deals.push(Deal { price, discount, store, link });
+        }
+
+        game_deals.push(GameDeals { name, historical_low, deals });
+    }
+    game_deals
+}
+
 async fn get_rss_feed() -> Result<Channel, Box<dyn Error>> {
     let feed_url = format!(
         "https://isthereanydeal.com/feeds/waitlist.rss?token={}",

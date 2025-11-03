@@ -82,7 +82,7 @@ fn parse_game_deals(html_content: &str) -> Result<Vec<GameDeals>, Box<dyn Error>
     Ok(game_deals)
 }
 
-async fn get_rss_feed() -> Result<(Channel, String), Box<dyn Error>> {
+async fn get_rss_feed() -> Result<Channel, Box<dyn Error>> {
     let feed_url = format!(
         "https://isthereanydeal.com/feeds/waitlist.rss?token={}",
         env::var("WAITLIST_RSS_TOKEN").unwrap()
@@ -93,13 +93,13 @@ async fn get_rss_feed() -> Result<(Channel, String), Box<dyn Error>> {
         .await?;
 
     let channel = Channel::read_from(&bytes[..])?;
-    Ok((channel, feed_url))
+    Ok(channel)
 }
 
 #[get("/")]
 async fn index() -> impl Responder {
     match get_rss_feed().await {
-        Ok((channel, feed_url)) => {
+        Ok(channel) => {
             let mut games_map: HashMap<String, GameDeals> = HashMap::new();
 
             for item in channel.items().iter().take(2) {
@@ -120,43 +120,35 @@ async fn index() -> impl Responder {
             }
 
             let mut html = String::new();
-            html.push_str("<html><head><title>Waitlist RSS Feed</title>");
-            html.push_str("<style>
-                body { font-family: sans-serif; line-height: 1.6; }
-                .game { border: 1px solid #ccc; border-radius: 8px; margin: 15px; padding: 15px; }
-                .game h2 { margin-top: 0; }
-                ul { padding-left: 20px; }
-                li { margin-bottom: 5px; }
-            </style>");
+            html.push_str("<html><head><title>Is There Any Deal? - Waitlist Notification</title>");
             html.push_str("</head><body>");
 
+            html.push_str("<ul class='list list-gap-10 list-with-separator collapsible-container' data-collapse-after='5'>");
             for game in games_map.values() {
-                html.push_str("<div class='game'>");
-                html.push_str(&format!("<h2>{}</h2>", game.name));
-                html.push_str(&format!("<p><strong>Historical Low:</strong> {}</p>", game.historical_low));
+                html.push_str("<li><div class='game'>");
+                html.push_str(&format!("<h2 class='color-highlight size-h2'>{}</h2>", game.name));
+                html.push_str(&format!("<p class='color-subdued'><strong>Historical Low:</strong> {}</p>", game.historical_low));
                 
                 if game.deals.is_empty() {
-                    html.push_str("<p>No current deals available.</p>");
+                    html.push_str("<p class='size-h4 color-negative'>No current deals available.</p>");
                 } else {
                     html.push_str("<ul>");
                     for deal in &game.deals {
                         html.push_str(&format!(
-                            "<li><a href='{}'>{}</a> ({}) - <strong>{}</strong></li>",
+                            "<li class='size-h4'><a class='color-primary' href='{}'><strong>{}</strong></a> ({}) - <strong class='color-subdued'>{}</strong></li>",
                             deal.link, deal.price, deal.discount, deal.store
                         ));
                     }
                     html.push_str("</ul>");
                 }
-                html.push_str("</div>");
+                html.push_str("</div></li>");
             }
-            html.push_str("</body></html>");
+            html.push_str("</ul></body></html>");
 
             actix_web::HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
                 .insert_header(("Widget-Title", "Is There Any Deal?"))
-                .insert_header(("Widget-Title-URL", feed_url))
                 .insert_header(("Widget-Content-Type", "html"))
-                .insert_header(("Widget-Content-Frameless", "false"))
                 .body(html)
         },
         Err(e) => {

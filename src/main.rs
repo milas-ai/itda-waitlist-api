@@ -24,6 +24,7 @@ struct Deal {
 #[derive(Debug, Clone)]
 struct GameDeals {
     name: String,
+    image_url: String,
     historical_low: String,
     deals: Vec<Deal>,
 }
@@ -38,22 +39,46 @@ fn parse_price_to_f32(price_str: &str) -> Option<f32> {
         .ok()
 }
 
-fn parse_game_deals(html_content: &str) -> Result<Vec<GameDeals>, Box<dyn Error>> {
+async fn get_image_url_from_metadata(info_url: &str) -> Option<String> {
+    let html_content = reqwest::get(info_url).await.ok()?.bytes().await.ok()?;
+    let document = Html::parse_document(std::str::from_utf8(&html_content).ok()?);
+    let meta_selector = Selector::parse("meta[property='og:image']").ok()?;
+
+    let image_url = document.select(&meta_selector)
+        .next()?
+        .value()
+        .attr("content")?;
+
+    Some(image_url.to_string())
+}
+
+async fn parse_game_deals(html_content: &str) -> Result<Vec<GameDeals>, Box<dyn Error>> {
     let document = Html::parse_document(html_content);
     let mut game_deals = Vec::new();
 
     let game_block_selector = Selector::parse("div[style*='margin-bottom:30px']").expect("Failed to create selector");
-    let game_name_selector = Selector::parse("a[style*='font-size:1.2em']").expect("Failed to create selector");
+    let name_selector = Selector::parse("a[style*='font-size:1.2em']").expect("Failed to create selector");
     let historical_low_selector = Selector::parse("div[style*='font-size: 0.9em']").expect("Failed to create selector");
     let deal_row_selector = Selector::parse("div[style*='padding-left:15px'] > div").expect("Failed to create selector");
     let price_link_selector = Selector::parse("a[style*='font-size:1.1em']").expect("Failed to create selector");
     let discount_selector = Selector::parse("span[style*='min-width:2.8em']").expect("Failed to create selector");
 
     for game_block in document.select(&game_block_selector) {
-        let name = game_block.select(&game_name_selector)
-            .next()
+        let name_element = game_block.select(&name_selector).next();
+
+        let name = name_element
             .map(|e| e.text().collect::<String>())
             .unwrap_or_else(|| "Unknown Game".to_string());
+
+        let info_url = name_element
+            .and_then(|e| e.value().attr("href"))
+            .unwrap_or("");
+
+        let image_url = if info_url.is_empty() {
+            None
+        } else {
+            get_image_url_from_metadata(info_url).await
+        };
 
         let historical_low = game_block.select(&historical_low_selector)
             .next()
@@ -95,7 +120,12 @@ fn parse_game_deals(html_content: &str) -> Result<Vec<GameDeals>, Box<dyn Error>
             deals.push(Deal { price, discount, store, link });
         }
 
-        game_deals.push(GameDeals { name, historical_low, deals });
+        game_deals.push(GameDeals {
+            name,
+            image_url: image_url.unwrap_or_else(|| "https://i.imgur.com/v4ChE6O.jpeg".to_string()),
+            historical_low,
+            deals,
+        });
     }
     Ok(game_deals)
 }
@@ -130,12 +160,13 @@ async fn index(query: web::Query<QueryParams>) -> impl Responder {
             let mut games_map: HashMap<String, GameDeals> = HashMap::new();
             for item in channel.items().iter().take(1) {
                 if let Some(description) = item.description() {
-                    if let Ok(parsed_games) = parse_game_deals(description) {
+                    if let Ok(parsed_games) = parse_game_deals(description).await {
                         for game in parsed_games {
                             games_map
                                 .entry(game.name.clone())
                                 .or_insert_with(|| GameDeals {
                                     name: game.name.clone(),
+                                    image_url: game.image_url.clone(),
                                     historical_low: game.historical_low.clone(),
                                     deals: Vec::new(),
                                 })
@@ -161,12 +192,17 @@ async fn index(query: web::Query<QueryParams>) -> impl Responder {
 
             let mut html = String::new();
             html.push_str("<html><head><title>Is There Any Deal? - Waitlist Notification</title>");
+            html.push_str("<style>
+                .game-container { display: flex; align-items: center; gap: 10px; }
+                .game-container img { height: 80px; aspect-ratio: 16/9; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+                .game-content { flex: 1; }
+            </style>");
             html.push_str("</head><body>");
 
             html.push_str(&format!("<ul class='list list-gap-10 list-with-separator collapsible-container' data-collapse-after='{}'>", collapse_after));
             for game in games {
-                html.push_str("<li><div class='game'>");
-                html.push_str(&format!("<h2 class='color-highlight size-h2'>{}</h2>", game.name));
+                html.push_str(&format!("<li class='game-container'><img src='{}' alt='{}' />", game.image_url, game.name));
+                html.push_str(&format!("<div class='game-content'><h2 class='color-highlight size-h2'>{}</h2>", game.name));
                 html.push_str(&format!("<p class='color-subdued'><strong>Historical Low:</strong> {}</p>", game.historical_low));
                 
                 if game.deals.is_empty() {

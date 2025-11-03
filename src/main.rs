@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use rss::Channel;
 use std::env;
+use std::f32;
 
 #[derive(Debug, Clone)]
 struct Deal {
@@ -18,6 +19,16 @@ struct GameDeals {
     name: String,
     historical_low: String,
     deals: Vec<Deal>,
+}
+
+fn parse_price_to_f32(price_str: &str) -> Option<f32> {
+    price_str
+        .replace("R$", "")
+        .replace(".", "")
+        .replace(",", ".")
+        .trim()
+        .parse::<f32>()
+        .ok()
 }
 
 fn parse_game_deals(html_content: &str) -> Result<Vec<GameDeals>, Box<dyn Error>> {
@@ -119,12 +130,26 @@ async fn index() -> impl Responder {
                 }
             }
 
+            let mut games: Vec<GameDeals> = games_map.into_values().collect();
+
+            games.sort_by(|a, b| {
+                let min_price_a = a.deals.iter()
+                    .filter_map(|d| parse_price_to_f32(&d.price))
+                    .fold(f32::MAX, f32::min);
+
+                let min_price_b = b.deals.iter()
+                    .filter_map(|d| parse_price_to_f32(&d.price))
+                    .fold(f32::MAX, f32::min);
+
+                min_price_a.partial_cmp(&min_price_b).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
             let mut html = String::new();
             html.push_str("<html><head><title>Is There Any Deal? - Waitlist Notification</title>");
             html.push_str("</head><body>");
 
             html.push_str("<ul class='list list-gap-10 list-with-separator collapsible-container' data-collapse-after='5'>");
-            for game in games_map.values() {
+            for game in games {
                 html.push_str("<li><div class='game'>");
                 html.push_str(&format!("<h2 class='color-highlight size-h2'>{}</h2>", game.name));
                 html.push_str(&format!("<p class='color-subdued'><strong>Historical Low:</strong> {}</p>", game.historical_low));

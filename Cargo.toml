@@ -11,3 +11,4 @@ env_logger = "0.11"
 dotenv = "0.15"
 rss = "2.0"
 reqwest = { version = "0.11", features = ["blocking"] }
+scraper = "0.24.0"

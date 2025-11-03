@@ -6,7 +6,7 @@ WORKDIR /usr/src/app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
-RUN cargo build --release --locked
+RUN cargo build --release
 
 # Final stage
 FROM debian:bookworm-slim

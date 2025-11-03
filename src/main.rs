@@ -168,14 +168,20 @@ async fn main() -> std::io::Result<()> {
     if let Err(_) = env::var("WAITLIST_RSS_TOKEN") {
         panic!("WAITLIST_RSS_TOKEN must be set in the environment");
     }
+
+    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string())
+        .parse::<u16>()
+        .expect("PORT must be a valid u16 number");
     
     env_logger::init();
+    println!("Starting server at http://{}:{}", host, port);
     HttpServer::new(|| {
         App::new()
             .wrap(Logger::default())
             .service(index)
     })
-    .bind(("127.0.0.1", 8286))?
+    .bind((host, port))?
     .run()
     .await
 }

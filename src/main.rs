@@ -82,7 +82,7 @@ fn parse_game_deals(html_content: &str) -> Result<Vec<GameDeals>, Box<dyn Error>
     Ok(game_deals)
 }
 
-async fn get_rss_feed() -> Result<Channel, Box<dyn Error>> {
+async fn get_rss_feed() -> Result<(Channel, String), Box<dyn Error>> {
     let feed_url = format!(
         "https://isthereanydeal.com/feeds/waitlist.rss?token={}",
         env::var("WAITLIST_RSS_TOKEN").unwrap()
@@ -93,13 +93,13 @@ async fn get_rss_feed() -> Result<Channel, Box<dyn Error>> {
         .await?;
 
     let channel = Channel::read_from(&bytes[..])?;
-    Ok(channel)
+    Ok((channel, feed_url))
 }
 
 #[get("/")]
 async fn index() -> impl Responder {
     match get_rss_feed().await {
-        Ok(channel) => {
+        Ok((channel, feed_url)) => {
             let mut games_map: HashMap<String, GameDeals> = HashMap::new();
 
             for item in channel.items().iter().take(2) {
@@ -129,7 +129,7 @@ async fn index() -> impl Responder {
                 li { margin-bottom: 5px; }
             </style>");
             html.push_str("</head><body>");
-            html.push_str("<h1>Waitlist RSS Feed</h1>");
+
             for game in games_map.values() {
                 html.push_str("<div class='game'>");
                 html.push_str(&format!("<h2>{}</h2>", game.name));
@@ -153,6 +153,10 @@ async fn index() -> impl Responder {
 
             actix_web::HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
+                .insert_header(("Widget-Title", "Is There Any Deal?"))
+                .insert_header(("Widget-Title-URL", feed_url))
+                .insert_header(("Widget-Content-Type", "html"))
+                .insert_header(("Widget-Content-Frameless", "false"))
                 .body(html)
         },
         Err(e) => {

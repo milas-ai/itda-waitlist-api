@@ -9,6 +9,8 @@ use std::f32;
 
 #[derive(Deserialize)]
 struct QueryParams {
+    #[serde(rename = "number-of-items")]
+    number_of_items: Option<String>,
     #[serde(rename = "collapse-after")]
     collapse_after: Option<String>,
     #[serde(rename = "show-thumbnails")]
@@ -160,10 +162,11 @@ async fn index(query: web::Query<QueryParams>) -> impl Responder {
             // Parameter handling
             let collapse_after = query.collapse_after.as_deref().unwrap_or("5");
             let show_thumbnails = query.show_thumbnails.as_deref().map(|s| s == "true").unwrap_or(true);
+            let number_of_items = query.number_of_items.as_deref().unwrap_or("5").parse::<usize>().unwrap_or(5);
 
             // Parse game deals from the RSS feed
             let mut games_map: HashMap<String, GameDeals> = HashMap::new();
-            for item in channel.items().iter().take(1) {
+            for item in channel.items().iter().take(number_of_items) {
                 if let Some(description) = item.description() {
                     if let Ok(parsed_games) = parse_game_deals(description).await {
                         for game in parsed_games {
